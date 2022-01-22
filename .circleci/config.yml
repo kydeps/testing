@@ -2,28 +2,111 @@ version: 2.1
 
 orbs:
   ci: kydeps/ci@dev:alpha
+  s3: circleci/aws-s3@3.0.0
+  win: circleci/windows@2.2.0
+
+executors:
+  # https://circleci.com/docs/2.0/configuration-reference/#resourceclass
+  linux:
+    docker:
+      - image: kyotov/kydeps:latest
+        auth:
+          username: kyotov
+          password: $DOCKERHUB_PASSWORD
+  macos:
+    macos:
+      # https://circleci.com/docs/2.0/testing-ios/
+      xcode: "13.2.1"
+      # resource_class: macos.x86.medium.gen2 # default is `medium`
+  windows: 
+    machine:
+      image: windows-server-2019-vs2019:stable
+      resource_class: windows.medium
+      shell: bash.exe
+
+commands:
+  setup:
+    parameters:
+      os:
+        type: string
+        default: linux
+    steps:
+      - checkout
+      - run: git submodule update --init --recursive
+      - run: mkdir -p ~/utils
+      - restore_cache:
+          keys:
+            - utils-<<parameters.os>>-v9
+      - when:
+          condition:
+            equal: [ macos, <<parameters.os>> ]
+          steps:
+            - run: |
+                test -f ~/utils/cmake/bin/cmake || ( \
+                  curl -L https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-macos-universal.tar.gz --output ~/cmake.tar.gz \
+                  && curl -L https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-mac.zip --output ~/ninja.zip \
+                  && cd ~/utils \
+                  && tar xvf ../cmake.tar.gz \
+                  && ln -s ~/utils/cmake-3.22.1-macos-universal/CMake.app/Contents ~/utils/cmake \
+                  && unzip ../ninja.zip \
+                ) 
+      - when:
+          condition:
+            equal: [ linux, <<parameters.os>> ]
+          steps:
+            - run: |
+                test -f ~/utils/cmake/bin/cmake || ( \
+                  curl -L https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-linux-x86_64.tar.gz --output ~/cmake.tar.gz \
+                  && curl -L https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-linux.zip --output ~/ninja.zip \
+                  && cd ~/utils \
+                  && tar xvf ../cmake.tar.gz \
+                  && ln -s ~/utils/cmake-3.22.1-linux-x86_64 ~/utils/cmake \
+                  && unzip ../ninja.zip \
+                )
+      - when:
+          condition:
+            equal: [ windows, <<parameters.os>> ]
+          steps:
+            - run: |
+                test -f ~/utils/cmake/bin/cmake.exe || ( \
+                  curl -L https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-windows-x86_64.zip --output ~/cmake.zip \
+                  && curl -L https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-win.zip --output ~/ninja.zip \
+                  && cd ~/utils \
+                  && unzip ../cmake.zip \
+                  && ln -s ~/utils/cmake-3.22.1-windows-x86_64 ~/utils/cmake \
+                  && unzip ../ninja.zip \
+                )
+      - run: ~/utils/cmake/bin/cmake --version
+      - run: ~/utils/ninja --version
+      - save_cache:
+          key: utils-<<parameters.os>>-v9
+          paths: 
+            - ~/utils
 
 jobs:
+
   build:
-    executor: ci/kydeps
     parameters:
+      os:
+        type: string
       cmake-args:
         default: ""
         type: string
       mode:
-        default: "mode-inline"
+        default: "mode-fetch"
         type: string
-    working_directory: ~/src
+    executor: <<parameters.os>>
+    working_directory: "~/src"
     steps:
-      - checkout
-      - run: cd ~/src && git submodule update --init --recursive
-      - run: mkdir ~/build
+      - setup:
+          os: <<parameters.os>>
+      - run: mkdir build
       - run: |
-          cd ~/build && 
-          cmake --log-level DEBUG -S ~/src -B . \
+          cd build && \
+          PATH=~/utils:${PATH}; ~/utils/cmake/bin/cmake --log-level DEBUG -S .. -B . -D CMAKE_BUILD_TYPE=Debug \
           -D 'KYDEPS_MODE=<< parameters.mode >>' << parameters.cmake-args >>
-      - run: cd ~/build && cmake --build .
-      - run: cd ~/build && ./tests
+      - run: cd build && ~/utils/cmake/bin/cmake --build . --config Debug
+      - run: cd build && ./tests
 
 workflows:
 
@@ -33,23 +116,33 @@ workflows:
           matrix:
             parameters:
               mode: [mode-inline, mode-fetch]
+              os: ["linux", "macos", "windows"]
+          name: "build--<<matrix.os>>--<<matrix.mode>>"
 
   cache-and-reuse:
     jobs:
       - build:
-          name: "build-and-cache"
+          matrix:
+            parameters:
+              mode: [mode-inline, mode-fetch]
+              os: ["linux", "macos", "windows"]
+          name: "build-and-cache--<<matrix.os>>--<<matrix.mode>>"
           post-steps:
             - persist_to_workspace:
-                root: ~/build/c
+                root: ~/src/build/c
                 paths:
                   - "*"
       - build:
-          name: "fetch-and-reuse"
+          matrix:
+            parameters:
+              mode: [mode-inline, mode-fetch]
+              os: ["linux", "macos", "windows"]
+          name: "fetch-and-reuse--<<matrix.os>>--<<matrix.mode>>"
           requires:
-            - build-and-cache
+            - "build-and-cache--<<matrix.os>>--<<matrix.mode>>"
           cmake-args: |
             -D 'KYDEPS_CACHE_BUCKET=file:///tmp/cache' \
-            -D 'KYDEPS_CACHE_REGISTRY=/tmp/cache/*.cmake' \
+            -D 'KYDEPS_CACHE_REGISTRY_DIR=/tmp/cache' \
             -D 'KYDEPS_BUILD=OFF'
           pre-steps:
             - attach_workspace:
