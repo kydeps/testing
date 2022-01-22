@@ -12,7 +12,15 @@ jobs:
           name: "Say hello to CMake"
           command: "cmake --version"
 
+  build:
+    executor: ci/kydeps
+    working_directory: "~/src"
+    steps:
+      - checkout
+      - run: find .
+
 workflows:
   say-hello-workflow:
     jobs:
       - say-hello
+      - build
