@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(external_package_experiment)
 
+set(KYDEPS_TARGETS gflags glog GTest)
+
 add_subdirectory(mode-inline)
 
 find_package(gflags REQUIRED CONFIG)
