@@ -14,10 +14,13 @@ jobs:
 
   build:
     executor: ci/kydeps
-    working_directory: "~/src"
     steps:
       - checkout
-      - run: find .
+      - run: git submodule update --init --recursive
+      - run: mkdir build
+      - run: cmake -S . -B build
+      - run: cmake --build build
+      - run: build/tests
 
 workflows:
   say-hello-workflow:
