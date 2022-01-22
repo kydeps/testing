@@ -4,26 +4,54 @@ orbs:
   ci: kydeps/ci@dev:alpha
 
 jobs:
-  say-hello:
-    executor: ci/kydeps
-    steps:
-      - checkout
-      - run:
-          name: "Say hello to CMake"
-          command: "cmake --version"
-
   build:
     executor: ci/kydeps
+    parameters:
+      cmake-args:
+        default: ""
+        type: string
+      mode:
+        default: "mode-inline"
+        type: string
+    working_directory: ~/src
     steps:
       - checkout
-      - run: git submodule update --init --recursive
-      - run: mkdir build
-      - run: cmake -S . -B build
-      - run: cmake --build build
-      - run: build/tests
+      - run: cd ~/src && git submodule update --init --recursive
+      - run: mkdir ~/build
+      - run: |
+          cd ~/build && 
+          cmake --log-level DEBUG -S ~/src -B . \
+          -D 'KYDEPS_MODE=<< parameters.mode >>' << parameters.cmake-args >>
+      - run: cd ~/build && cmake --build .
+      - run: cd ~/build && ./tests
 
 workflows:
-  say-hello-workflow:
+
+  simple:
     jobs:
-      - say-hello
-      - build
+      - build:
+          matrix:
+            parameters:
+              mode: [mode-inline, mode-fetch]
+
+  cache-and-reuse:
+    jobs:
+      - build:
+          name: "build-and-cache"
+          post-steps:
+            - persist_to_workspace:
+                root: ~/build/c
+                paths:
+                  - "*"
+      - build:
+          name: "fetch-and-reuse"
+          requires:
+            - build-and-cache
+          cmake-args: |
+            -D 'KYDEPS_CACHE_BUCKET=file:///tmp/cache' \
+            -D 'KYDEPS_CACHE_REGISTRY=/tmp/cache/*.cmake' \
+            -D 'KYDEPS_BUILD=OFF'
+          pre-steps:
+            - attach_workspace:
+                at: /tmp/cache
+            - run: find /tmp/cache

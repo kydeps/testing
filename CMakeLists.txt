@@ -3,7 +3,15 @@ project(external_package_experiment)
 
 set(KYDEPS_TARGETS gflags glog GTest)
 
-add_subdirectory(mode-inline)
+# modes:
+# - mode-inline
+# - mode-fetch
+#
+if("${KYDEPS_MODE}" STREQUAL "")
+    set(KYDEPS_MODE "mode-inline")    
+endif()
+
+add_subdirectory(${KYDEPS_MODE})
 
 find_package(gflags REQUIRED CONFIG)
 find_package(glog REQUIRED CONFIG)

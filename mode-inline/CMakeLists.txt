@@ -9,6 +9,7 @@ FetchContent_Declare(kydep_bootstrap
     GIT_TAG v2.4
 )
 FetchContent_MakeAvailable(kydep_bootstrap)
+IncludeGlob("${KYDEPS_CACHE_REGISTRY}")
 #
 # ===== [END] KyDeps CMakeLists.txt preamble ===================================
 # ==============================================================================
